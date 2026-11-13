@@ -1,0 +1,20 @@
+{
+  "title": "EGOFET Toolkit",
+  "apps": [
+    {
+      "name": "Transfer curves",
+      "description": "Transfer measurements, V_th extraction, and CSV export.",
+      "path": "notebooks/02_transfer_curves/02_transfer_marimo.py"
+    },
+    {
+      "name": "Calibration curve",
+      "description": "Calibration batches and response curves.",
+      "path": "notebooks/04_calibration_curve/02_calibration_marimo.py"
+    },
+    {
+      "name": "Data exploration",
+      "description": "Inspect HDF5 files, measurements, datasets, and attributes.",
+      "path": "notebooks/01_exploration/02_exploration_marimo.py"
+    }
+  ]
+}

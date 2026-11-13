@@ -1,0 +1,13 @@
+name: egofets
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.15
+  - h5py
+  - pandas
+  - numpy
+  - scipy
+  - matplotlib
+  - marimo
+  - jupyter
+  - ipykernel

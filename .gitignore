@@ -1,0 +1,39 @@
+# --- Build / Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Generated caches ---
+.vscode/
+.ruff_cache/
+__marimo__/
+
+# --- Generated reports and figures ---
+output/
+
+
+# Note: __init__.py is intentionally NOT ignored — it is the
+# Python package marker required for `from src...` imports.
+
+# --- LaTeX ---
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.synctex(busy)
+*.bbl
+*.blg
+*.nav
+*.snm
+*.vrb
+*.xdv

@@ -1,0 +1,21 @@
+[project]
+name = "egofets-toolkit"
+version = "0.1.0"
+description = "Analysis and reporting toolkit for electrolyte-gated organic field-effect transistors (EGOFETs)."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "David Ibarra" }]
+requires-python = ">=3.10,<3.15"
+dependencies = [
+    "h5py",
+    "pandas",
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "marimo>=0.23",
+    "jupyter",
+    "ipykernel",
+]
+
+[tool.uv]
+package = false
