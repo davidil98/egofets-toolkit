@@ -1,16 +1,10 @@
-# /// script
-# [tool.marimo.opengraph]
-# title = "Transfer curves"
-# description = "Interactive transfer report with V_th extraction."
-# ///
-
 import marimo
 
 __generated_with = "0.25.2"
-app = marimo.App(width="full", app_title="EGOFET — Transfer curves")
+app = marimo.App(width="full", app_title="EGOFET — Transfer analysis")
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _():
     import os
     import sys
@@ -19,130 +13,446 @@ def _():
     import marimo as mo
     import matplotlib.pyplot as plt
     import numpy as np
+    import pandas as pd
     from scipy.stats import linregress
 
-    return Path, linregress, mo, np, os, plt, sys
+    return Path, linregress, mo, np, os, pd, plt, sys
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # Reporte de Transfer Curves — EGOFET
-
-    Visualización de todas las mediciones de transfer de un archivo HDF5,
-    con extracción automática de $V_{th}$ por el método $\sqrt{|I_{DS}|}$.
-
-    Seleccionar el archivo, excluir mediciones y ajusta la ventana de extracción
-    con los controles de abajo. Los resultados se pueden descargar como CSV.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(Path, mo, os, sys):
-    def find_project_root(marker="src"):
+@app.cell
+def _(Path, os, sys):
+    def _find_project_root(marker="src"):
         cwd = Path(os.getcwd()).resolve()
         for parent in [cwd, *cwd.parents]:
             if (parent / marker).is_dir():
                 return parent
         raise FileNotFoundError(f"No se encontro un directorio con '{marker}'")
 
+    _PROJECT_ROOT = _find_project_root()
+    if str(_PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(_PROJECT_ROOT))
 
-    PROJECT_ROOT = find_project_root()
-    if str(PROJECT_ROOT) not in sys.path:
-        sys.path.insert(0, str(PROJECT_ROOT))
-
-    from src.analysis import extract_vth_for_transfers
-    from src.plotting import plot_transfer
+    from src.analysis import (
+        clean_forward_branch,
+        extract_transfer_metrics,
+        forward_gm,
+    )
+    from src.plotting import plot_transfer, plot_transfer_linearized
     from src.readers.keithley_dean import (
         list_measurements,
         read_all_curves,
         read_curve,
+        view_measurements,
     )
 
-    data_folder = PROJECT_ROOT / "data" / "raw"
+    data_folder = _PROJECT_ROOT / "data" / "raw"
     hdf5_files = sorted(p.name for p in data_folder.glob("*.hdf5"))
 
-    # Archivo que abre por defecto (si esta disponible).
     default_file = "transf-outp_example.hdf5"
     if default_file not in hdf5_files:
         default_file = hdf5_files[0] if hdf5_files else None
-
-    file_widget = mo.ui.dropdown(
-        options=hdf5_files,
-        value=default_file,
-        label="Archivo HDF5",
-        searchable=True,
-    )
-    file_widget
     return (
+        clean_forward_branch,
         data_folder,
-        extract_vth_for_transfers,
-        file_widget,
+        default_file,
+        extract_transfer_metrics,
+        forward_gm,
         hdf5_files,
         list_measurements,
         plot_transfer,
+        plot_transfer_linearized,
         read_all_curves,
         read_curve,
+        view_measurements,
     )
 
 
-@app.cell(hide_code=True)
-def _(data_folder, file_widget, hdf5_files, mo):
-    mo.stop(
-        not hdf5_files,
-        mo.md(f"**No se encontraron archivos `.hdf5` en** `{data_folder}`"),
-    )
-    hdf5_path = data_folder / file_widget.value
-    mo.md(f"`{hdf5_path}`")
-    return (hdf5_path,)
-
-
-@app.cell(hide_code=True)
+@app.cell
 def _(mo):
     mo.md(r"""
-    ## Mediciones
+    # Análisis de curvas de transferencia — EGOFET
+
+    Versión paso a paso del análisis de curvas $I_{DS}$ vs $V_{GS}$ a $V_{DS}$
+    constante. El recorrido sigue el notebook `01_transfer_analysis.ipynb`:
+
+    1. Carga y exploración de las mediciones.
+    2. Regímenes de operación y linealización $\sqrt{|I_{DS}|}$.
+    3. Extracción de $V_{th}$ con ventana elegida a mano.
+    4. $SS$, $I_{on}/I_{off}$ y transconductancia.
+    5. Comparación entre mediciones o batches.
+
+    Esta app es para desarrollo: se abre con `marimo edit` y muestra el código.
+    La versión condensada para consumidores es `03_transfer_report.py`.
     """)
     return
 
 
 @app.cell
-def _(hdf5_path, list_measurements, mo):
+def _(data_folder, hdf5_files, mo):
+    mo.stop(
+        not hdf5_files,
+        mo.callout(
+            mo.md(f"No se encontraron archivos `.hdf5` en `{data_folder}`"),
+            kind="warn",
+        ),
+    )
+    return
+
+
+@app.cell
+def _(default_file, hdf5_files, mo):
+    file_widget = mo.ui.dropdown(
+        options=hdf5_files,
+        value=default_file,
+        label="Archivo HDF5",
+        searchable=True,
+        full_width=True,
+    )
+    file_widget
+    return (file_widget,)
+
+
+@app.cell
+def _(data_folder, file_widget, list_measurements, mo, pd):
+    hdf5_path = data_folder / file_widget.value
     measurements = list_measurements(hdf5_path)
     transfer_measurements = [
         m["name"] for m in measurements if m["mode"] == "transfer"
     ]
 
-    exclude_widget = mo.ui.multiselect(
-        options=transfer_measurements,
-        value=[],
-        label="Excluir mediciones del análisis",
-        full_width=True,
+    _summary = (
+        pd.DataFrame(measurements)
+        .groupby("mode")
+        .agg(mediciones=("name", "count"), curvas=("n_curves", "sum"))
+        .reset_index()
+        if measurements
+        else pd.DataFrame()
     )
-    exclude_widget
-    return exclude_widget, transfer_measurements
+    mo.vstack(
+        [
+            mo.md(f"**Archivo:** `{file_widget.value}`"),
+            mo.ui.table(
+                _summary,
+                selection=None,
+                pagination=False,
+                show_download=False,
+                label="Contenido del archivo por tipo de medición",
+            ),
+        ],
+        gap=1,
+    )
+    return hdf5_path, measurements, transfer_measurements
 
 
 @app.cell
-def _(exclude_widget, mo, transfer_measurements):
-    selected_measurements = [
-        m for m in transfer_measurements if m not in exclude_widget.value
-    ]
-    mo.md(
-        f"**{len(selected_measurements)}** de **{len(transfer_measurements)}** "
-        "mediciones de transfer seleccionadas."
-    )
-    return (selected_measurements,)
-
-
-@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Parámetros de extracción de $V_{th}$
+    ## 1. Curvas de transferencia
 
-    La ventana $(V_{min}, V_{max})$ se busca en una grilla de 0.01 V para
-    maximizar $R^2$ del ajuste lineal de $\sqrt{|I_{DS}|}$ vs $V_{GS}$
-    (rama de ida).
+    Cada medición `transfer` contiene varias curvas, una por $V_{DS}$. La curva
+    con mayor $|V_{DS}|$ es la que mejor aproxima el régimen de saturación y se
+    usa para extraer $V_{th}$.
+    """)
+    return
+
+
+@app.cell
+def _(mo, transfer_measurements):
+    measurement_widget = mo.ui.dropdown(
+        options=transfer_measurements,
+        value=transfer_measurements[0] if transfer_measurements else None,
+        label="Medición a inspeccionar",
+        searchable=True,
+        full_width=True,
+    )
+    exclude_widget = mo.ui.multiselect(
+        options=transfer_measurements,
+        value=[],
+        label="Mediciones excluidas de la comparación",
+        full_width=True,
+    )
+    mo.vstack([measurement_widget, exclude_widget], gap=1)
+    return exclude_widget, measurement_widget
+
+
+@app.cell
+def _(hdf5_path, measurement_widget, mo, pd, read_all_curves):
+    _curves = read_all_curves(
+        hdf5_path, measurement_widget.value, direction="fwd"
+    )
+    _rows = [
+        {
+            "curva": c["curve_name"],
+            "V_DS (V)": float(c["v_ds"][0]),
+            "V_GS mín (V)": float(min(c["v_gs"])),
+            "V_GS máx (V)": float(max(c["v_gs"])),
+            "puntos": len(c["v_gs"]),
+        }
+        for c in _curves
+    ]
+    df_curves = pd.DataFrame(_rows).sort_values("V_DS (V)", key=abs)
+    mo.ui.table(
+        df_curves,
+        selection=None,
+        pagination=False,
+        show_download=False,
+        format_mapping={
+            "V_DS (V)": "{:.3f}",
+            "V_GS mín (V)": "{:.3f}",
+            "V_GS máx (V)": "{:.3f}",
+        },
+        label="Curvas de la medición seleccionada",
+    )
+    return (df_curves,)
+
+
+@app.cell
+def _(hdf5_path, measurement_widget, mo, plt, plot_transfer):
+    _fig, _ax = plot_transfer(
+        hdf5_path, measurement_widget.value, direction="both"
+    )
+    _ax.set_title(f"Transfer — {measurement_widget.value}", fontsize=11)
+    _view = mo.as_html(_fig)
+    plt.close(_fig)
+    _view
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 2. Regímenes de operación y linealización
+
+    En un FET la operación se divide en dos regímenes según:
+
+    $$|V_{DS}| \geq |V_{GS} - V_{th}| \quad \text{(saturación)}$$
+
+    En **saturación**, y suponiendo movilidad constante, la corriente sigue la
+    ley cuadrática:
+
+    $$|I_{DS}^{sat}| = \frac{1}{2}\,\mu_{sat}\,C\,\frac{W}{L}\,(V_{GS} - V_{th})^2$$
+
+    Tomando raíz cuadrada queda una relación **lineal**:
+
+    $$\sqrt{|I_{DS}|} = \sqrt{\tfrac{1}{2}\mu_{sat}\,C\,\tfrac{W}{L}}\cdot(V_{GS} - V_{th})$$
+
+    La recta tiene pendiente $m$ (relacionada con la movilidad) y cruza el eje
+    $V_{GS}$ en $V_{th}$:
+
+    $$V_{th} = -\frac{b}{m}$$
+
+    Con $W$, $L$ en m y $C$ en F/m², la movilidad de saturación es
+
+    $$\mu_{sat}C = \frac{2L}{W}\,m^2$$
+
+    que se convierte a cm²/V·s multiplicando por $10^4$. Como en un EGOFET el
+    dieléctrico es el medio acuoso, $C$ suele absorberse en el producto
+    $\mu_{sat}C$ salvo que se mida la capacitancia de la doble capa.
+    """)
+    return
+
+
+@app.cell
+def _(
+    clean_forward_branch,
+    hdf5_path,
+    measurement_widget,
+    mo,
+    np,
+    plt,
+    read_all_curves,
+):
+    _curves = read_all_curves(
+        hdf5_path, measurement_widget.value, direction="fwd"
+    )
+    _curve = max(_curves, key=lambda c: abs(float(c["v_ds"][0])))
+    v_gs_fit, i_ds_fit = clean_forward_branch(_curve["v_gs"], _curve["i_ds"])
+    sqrt_ids = np.sqrt(np.abs(i_ds_fit))
+
+    _fig, _ax = plt.subplots(figsize=(8.5, 4.6))
+    _ax.plot(v_gs_fit, i_ds_fit * 1e9, "o-", ms=3, color="C0", label=r"$I_{DS}$")
+    _ax.set_xlabel(r"$V_{GS}$ (V)")
+    _ax.set_ylabel(r"$I_{DS}$ (nA)", color="C0")
+    _ax.grid(True, alpha=0.3)
+
+    _ax2 = _ax.twinx()
+    _ax2.plot(v_gs_fit, sqrt_ids, "s-", ms=3, color="C3", label=r"$\sqrt{|I_{DS}|}$")
+    _ax2.set_ylabel(r"$\sqrt{|I_{DS}|}$ ($\sqrt{A}$)", color="C3")
+
+    _ax.set_title(
+        f"{measurement_widget.value} — $V_{{DS}}={float(_curve['v_ds'][0]):.3f}$ V",
+        fontsize=11,
+    )
+    _view = mo.as_html(_fig)
+    plt.close(_fig)
+    _view
+    return i_ds_fit, sqrt_ids, v_gs_fit
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Ventana de ajuste
+
+    La ventana se elige sobre la zona donde $\sqrt{|I_{DS}|}$ es lineal. La
+    segunda derivada sirve de referencia: en la región lineal
+    $d^2\sqrt{|I_{DS}|}/dV_{GS}^2 \approx 0$. Movés los extremos y el ajuste se
+    recalcula.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    window_widget = mo.ui.range_slider(
+        start=-1.00,
+        stop=0.50,
+        step=0.01,
+        value=[-0.40, -0.12],
+        label=r"Ventana de ajuste $[V_{min}, V_{max}]$ (V)",
+        show_value=True,
+        debounce=True,
+    )
+    window_widget
+    return (window_widget,)
+
+
+@app.cell
+def _(
+    linregress,
+    mo,
+    np,
+    plt,
+    sqrt_ids,
+    v_gs_fit,
+    window_widget,
+):
+    _v_min, _v_max = window_widget.value
+    _mask = (v_gs_fit >= _v_min) & (v_gs_fit <= _v_max)
+    if _v_min >= _v_max or _mask.sum() < 3:
+        _view = mo.callout(
+            mo.md("Ventana inválida: elegí al menos 3 puntos con $V_{min}<V_{max}$."),
+            kind="warn",
+        )
+    else:
+        _result = linregress(v_gs_fit[_mask], sqrt_ids[_mask])
+        _v_th = -_result.intercept / _result.slope
+
+        _d2 = np.gradient(np.gradient(sqrt_ids, v_gs_fit), v_gs_fit)
+        _fig, (_ax1, _ax2) = plt.subplots(
+            2,
+            1,
+            figsize=(9, 6.5),
+            sharex=True,
+            gridspec_kw={"height_ratios": [3, 1]},
+        )
+        _ax1.plot(v_gs_fit, sqrt_ids, "s-", ms=3, color="C3", label=r"$\sqrt{|I_{DS}|}$")
+        _x_fit = np.array([_v_min, _v_max])
+        _ax1.plot(
+            _x_fit,
+            _result.intercept + _result.slope * _x_fit,
+            "--",
+            color="C2",
+            lw=2,
+            label=(
+                f"ajuste: $V_{{th}}$={_v_th:.3f} V, "
+                f"$R^2$={_result.rvalue ** 2:.4f}"
+            ),
+        )
+        _ax1.axvline(_v_min, color="gray", ls=":", lw=0.8)
+        _ax1.axvline(_v_max, color="gray", ls=":", lw=0.8)
+        _ax1.set_ylabel(r"$\sqrt{|I_{DS}|}$ ($\sqrt{A}$)")
+        _ax1.grid(True, alpha=0.3)
+        _ax1.legend(fontsize=8)
+
+        _ax2.plot(v_gs_fit, _d2, "b-", lw=1.2)
+        _ax2.axhline(0, color="k", lw=0.5, ls="--")
+        _ax2.axvspan(_v_min, _v_max, color="C1", alpha=0.15)
+        _ax2.set_xlabel(r"$V_{GS}$ (V)")
+        _ax2.set_ylabel(r"$d^2\sqrt{|I_{DS}|}/dV_{GS}^2$")
+        _ax2.grid(True, alpha=0.3)
+        _fig.tight_layout()
+
+        _view = mo.vstack(
+            [
+                mo.as_html(_fig),
+                mo.md(
+                    f"**Resultado:** $V_{{th}}$ = {_v_th:.3f} V, "
+                    f"$R^2$ = {_result.rvalue ** 2:.4f}, "
+                    f"{int(_mask.sum())} puntos en la ventana."
+                ),
+            ],
+            gap=1,
+        )
+        plt.close(_fig)
+    _view
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 3. Métricas de conmutación
+
+    **Subthreshold swing.** Cuantifica qué tan rápido pasa el transistor de off
+    a on:
+
+    $$SS = \left[\frac{d(\log_{10}|I_{DS}|)}{dV_{GS}}\right]^{-1}_{\max}
+    \quad \text{(V/dec)}$$
+
+    Cuanto menor, mejor. En EGOFETs suele estar entre 0.1 y 1 V/dec.
+
+    **Relación $I_{on}/I_{off}$.** Compara la corriente encendida con la
+    apagada. En este análisis se usa el máximo y el mínimo de $|I_{DS}|$ en el
+    barrido. Cuanto mayor, mejor la modulación.
+
+    **Transconductancia.**
+
+    $$g_m = \left.\frac{\partial I_{DS}}{\partial V_{GS}}\right|_{V_{DS}}$$
+
+    El $V_{GS}$ de $|g_m|$ máxima es un buen punto de lectura para calibración,
+    porque ahí la corriente responde más a cambios de gate.
+    """)
+    return
+
+
+@app.cell
+def _(forward_gm, hdf5_path, measurement_widget, mo, np, plt, read_all_curves):
+    _curves = read_all_curves(
+        hdf5_path, measurement_widget.value, direction="fwd"
+    )
+    _fig, _ax = plt.subplots(figsize=(8.5, 4.2))
+    for _curve in _curves:
+        _v, _i, _gm = forward_gm(_curve["v_gs"], _curve["i_ds"])
+        if _gm.size:
+            _ax.plot(
+                _v,
+                _gm,
+                lw=1.2,
+                label=f"$V_{{DS}}$={float(_curve['v_ds'][0]):.2f} V",
+            )
+    _ax.axhline(0, color="gray", ls=":", lw=0.8)
+    _ax.set_xlabel(r"$V_{GS}$ (V)")
+    _ax.set_ylabel(r"$g_m$ (A/V)")
+    _ax.set_title(f"Transconductancia — {measurement_widget.value}", fontsize=11)
+    _ax.grid(True, alpha=0.3)
+    _ax.legend(fontsize=8, title=r"$V_{DS}$")
+    _fig.tight_layout()
+    _view = mo.as_html(_fig)
+    plt.close(_fig)
+    _view
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 4. Comparación entre mediciones
+
+    Para cada medición se toma la curva de mayor $|V_{DS}|$, se busca la ventana
+    $(V_{min}, V_{max})$ que maximiza $R^2$ de $\sqrt{|I_{DS}|}$ y se calculan
+    las métricas de conmutación. Los rangos de búsqueda se ajustan abajo; el
+    resultado se congela en la tabla.
     """)
     return
 
@@ -153,8 +463,8 @@ def _(mo):
         start=-0.60,
         stop=0.00,
         step=0.01,
-        value=[-0.40, -0.38],
-        label=r"Ventana de ajuste — $V_{min}$ (V)",
+        value=[-0.40, -0.20],
+        label=r"Rango de búsqueda — $V_{min}$ (V)",
         show_value=True,
         debounce=True,
     )
@@ -162,360 +472,168 @@ def _(mo):
         start=-0.60,
         stop=0.00,
         step=0.01,
-        value=[-0.06, 0.00],
-        label=r"Ventana de ajuste — $V_{max}$ (V)",
+        value=[-0.15, -0.05],
+        label=r"Rango de búsqueda — $V_{max}$ (V)",
         show_value=True,
         debounce=True,
     )
-    r2_widget = mo.ui.slider(
-        start=0.0,
-        stop=1.0,
-        step=0.05,
-        value=0.80,
-        label=r"$R^2$ mínimo para el resumen",
-        show_value=True,
-        debounce=True,
-    )
-    ncols_widget = mo.ui.slider(
-        start=1,
-        stop=4,
-        step=1,
-        value=3,
-        label="Columnas de la grilla",
-        show_value=True,
-    )
-    direction_widget = mo.ui.dropdown(
-        options={"Ambas": "both", "Ida": "fwd", "Vuelta": "reverse"},
-        value="Ambas",
-        label="Barrido a graficar",
-    )
-    interactive_widget = mo.ui.switch(value=False, label="Gráficos interactivos")
-
-    mo.vstack(
-        [
-            vmin_widget,
-            vmax_widget,
-            r2_widget,
-            mo.hstack([ncols_widget, direction_widget, interactive_widget]),
-        ],
-        gap=1,
-    )
-    return (
-        direction_widget,
-        interactive_widget,
-        ncols_widget,
-        r2_widget,
-        vmax_widget,
-        vmin_widget,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Curvas de transfer
-    """)
-    return
+    mo.hstack([vmin_widget, vmax_widget], gap=1, wrap=True, align="end")
+    return vmax_widget, vmin_widget
 
 
 @app.cell
 def _(
-    direction_widget,
-    hdf5_path,
-    interactive_widget,
-    mo,
-    ncols_widget,
-    plot_transfer,
-    plt,
-    selected_measurements,
-):
-    def plot_grid(
-        path,
-        measurement_names,
-        plot_func,
-        ncols=3,
-        figsize_per=(5, 4),
-        direction="both",
-    ):
-        n = len(measurement_names)
-        if n == 0:
-            return None
-        nrows = (n + ncols - 1) // ncols
-        fig, axes = plt.subplots(
-            nrows,
-            ncols,
-            figsize=(figsize_per[0] * ncols, figsize_per[1] * nrows),
-            squeeze=False,
-        )
-        axes_flat = axes.ravel()
-        for ax, name in zip(axes_flat, measurement_names):
-            plot_func(path, name, ax=ax, direction=direction)
-        for ax in axes_flat[n:]:
-            ax.set_visible(False)
-        fig.tight_layout()
-        return fig
-
-
-    fig_curves = plot_grid(
-        hdf5_path,
-        selected_measurements,
-        plot_transfer,
-        ncols=ncols_widget.value,
-        direction=direction_widget.value,
-    )
-    if fig_curves is None:
-        _curves_view = mo.md("_No hay mediciones seleccionadas._")
-    elif interactive_widget.value:
-        _curves_view = mo.mpl.interactive(fig_curves)
-    else:
-        _curves_view = mo.as_html(fig_curves)
-    _curves_view
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Extracción de $V_{th}$
-    """)
-    return
-
-
-@app.cell
-def _(
-    extract_vth_for_transfers,
+    exclude_widget,
+    extract_transfer_metrics,
     hdf5_path,
     mo,
-    selected_measurements,
+    transfer_measurements,
     vmax_widget,
     vmin_widget,
 ):
-    with mo.capture_stdout() as log_buffer:
-        df_vth = extract_vth_for_transfers(
+    _selected = [
+        m for m in transfer_measurements if m not in exclude_widget.value
+    ]
+    mo.stop(
+        not _selected,
+        mo.callout(mo.md("No hay mediciones seleccionadas."), kind="warn"),
+    )
+    with mo.capture_stdout() as _buffer:
+        df_metrics = extract_transfer_metrics(
             hdf5_path,
-            selected_measurements,
+            _selected,
             v_min_range=tuple(vmin_widget.value),
             v_max_range=tuple(vmax_widget.value),
         )
-    log = log_buffer.getvalue().strip()
-    return df_vth, log
-
-
-@app.cell
-def _(df_vth, log, mo, r2_widget):
-    parts = []
-    if df_vth.empty:
-        parts.append(
+    _log = _buffer.getvalue().strip()
+    mo.stop(
+        df_metrics.empty,
+        mo.callout(
             mo.md(
-                "_No se pudo extraer $V_{th}$ de las mediciones seleccionadas. "
-                "Revisá la ventana de ajuste._"
-            )
-        )
-    else:
-        good = df_vth[df_vth["R^2"] >= r2_widget.value]
-        stats = mo.hstack(
-            [
-                mo.stat(value=str(len(df_vth)), label="Fits", bordered=True),
-                mo.stat(
-                    value=str(len(good)),
-                    label=f"R² ≥ {r2_widget.value:.2f}",
-                    bordered=True,
-                ),
-                mo.stat(
-                    value=(
-                        f"{good['V_th (V)'].mean():.3f} V"
-                        if len(good)
-                        else "—"
-                    ),
-                    label="V_th medio (fits buenos)",
-                    bordered=True,
-                ),
-                mo.stat(
-                    value=f"{df_vth['V_th (V)'].mean():.3f} V",
-                    label="V_th medio (todos)",
-                    bordered=True,
-                ),
-            ],
-            justify="start",
-            wrap=True,
-        )
-        table = mo.ui.table(
-            df_vth,
-            pagination=False,
-            selection=None,
-            show_download=False,
-            format_mapping={
-                "V_DS (V)": "{:.3f}",
-                "V_th (V)": "{:.3f}",
-                "v_min (V)": "{:.2f}",
-                "v_max (V)": "{:.2f}",
-                "R^2": "{:.4f}",
-            },
-            label="Resultados por medición",
-        )
-        parts.extend([stats, table])
-
-    if log:
-        parts.append(
-            mo.accordion(
-                {"Mensajes de la extracción": mo.md(f"```\n{log}\n```")}
-            )
-        )
-
-    mo.vstack(parts, gap=1)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Linealización de $\sqrt{|I_{DS}|}$
-
-    Cada panel muestra la curva usada para el ajuste y la recta en la
-    ventana que maximizó $R^2$.
-    """)
-    return
-
-
-@app.cell
-def _(
-    df_vth,
-    hdf5_path,
-    interactive_widget,
-    linregress,
-    mo,
-    ncols_widget,
-    np,
-    plt,
-    read_all_curves,
-    read_curve,
-):
-    def plot_linearized_grid(path, df, ncols=3, figsize_per=(5, 4)):
-        n = len(df)
-        if n == 0:
-            return None
-        nrows = (n + ncols - 1) // ncols
-        fig, axes = plt.subplots(
-            nrows,
-            ncols,
-            figsize=(figsize_per[0] * ncols, figsize_per[1] * nrows),
-            squeeze=False,
-        )
-        axes_flat = axes.ravel()
-
-        for ax, (_, row) in zip(axes_flat, df.iterrows()):
-            name = row["measurement"]
-            v_min_w = row["v_min (V)"]
-            v_max_w = row["v_max (V)"]
-            try:
-                curves = read_all_curves(path, name)
-                i_max = max(
-                    range(len(curves)),
-                    key=lambda i: abs(curves[i]["v_ds"][0]),
-                )
-                curve = curves[i_max]
-                v_gs, i_ds = read_curve(
-                    path, name, curve["curve_name"], direction="fwd"
-                )
-                sqrt_ids = np.sqrt(np.abs(i_ds))
-
-                mask = (v_gs >= v_min_w) & (v_gs <= v_max_w)
-                slope, intercept, r_value, _, _ = linregress(
-                    v_gs[mask], sqrt_ids[mask]
-                )
-                v_th = -intercept / slope
-
-                ax.plot(v_gs, sqrt_ids, "rs-", ms=3, label=r"$\sqrt{|I_{DS}|}$")
-                x_fit = np.array([v_min_w, v_max_w])
-                ax.plot(
-                    x_fit,
-                    slope * x_fit + intercept,
-                    "g--",
-                    lw=2,
-                    label=f"fit ($V_{{th}}$={v_th:.3f} V, $R^2$={r_value**2:.4f})",
-                )
-                ax.axvline(v_min_w, color="gray", ls=":", lw=0.8)
-                ax.axvline(v_max_w, color="gray", ls=":", lw=0.8)
-                ax.set_xlabel(r"$V_{GS}$ (V)")
-                ax.set_ylabel(r"$\sqrt{|I_{DS}|}$ ($\sqrt{A}$)")
-                ax.set_title(name, fontsize=9)
-                ax.legend(fontsize=7)
-                ax.grid(True, alpha=0.3)
-            except Exception as e:
-                ax.text(
-                    0.5,
-                    0.5,
-                    f"Error: {e}",
-                    transform=ax.transAxes,
-                    ha="center",
-                    va="center",
-                    wrap=True,
-                )
-
-        for ax in axes_flat[n:]:
-            ax.set_visible(False)
-        fig.tight_layout()
-        return fig
-
-
-    fig_linear = plot_linearized_grid(
-        hdf5_path, df_vth, ncols=ncols_widget.value
+                "No se pudo extraer $V_{th}$ de las mediciones seleccionadas. "
+                "Revisá los rangos de búsqueda."
+            ),
+            kind="warn",
+        ),
     )
-    if fig_linear is None:
-        _linear_view = mo.md("_No hay datos de $V_{th}$ para graficar._")
-    elif interactive_widget.value:
-        _linear_view = mo.mpl.interactive(fig_linear)
-    else:
-        _linear_view = mo.as_html(fig_linear)
-    _linear_view
-    return
+    return (df_metrics,)
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Exportar
-    """)
+@app.cell
+def _(df_metrics, mo):
+    _ss = df_metrics["SS (V/dec)"].median()
+    _ratio = df_metrics["I_on/I_off"].median()
+    mo.hstack(
+        [
+            mo.stat(str(len(df_metrics)), label="Mediciones", bordered=True),
+            mo.stat(
+                f"{df_metrics['V_th (V)'].mean():.3f} V", label="V_th medio", bordered=True
+            ),
+            mo.stat(
+                f"{df_metrics['R^2'].mean():.3f}", label="R² medio", bordered=True
+            ),
+            mo.stat(
+                f"{_ss:.3f} V/dec" if _ss == _ss else "—",
+                label="SS mediana",
+                bordered=True,
+            ),
+            mo.stat(
+                f"{_ratio:.1f}" if _ratio == _ratio else "—",
+                label="I_on/I_off mediana",
+                bordered=True,
+            ),
+        ],
+        justify="start",
+        wrap=True,
+        gap=1,
+    )
     return
 
 
 @app.cell
-def _(Path, df_vth, file_widget, mo):
-    if df_vth.empty:
-        _download_view = mo.md("_No hay resultados para descargar._")
-    else:
-        _download_view = mo.download(
-            data=lambda: df_vth.to_csv(index=False),
-            filename=f"vth_{Path(file_widget.value).stem}.csv",
-            mimetype="text/csv",
-            label="Descargar resultados (CSV)",
-        )
-    _download_view
+def _(df_metrics, mo):
+    mo.ui.table(
+        df_metrics,
+        pagination=False,
+        selection=None,
+        show_download=False,
+        format_mapping={
+            "V_DS (V)": "{:.3f}",
+            "V_th (V)": "{:.3f}",
+            "v_min (V)": "{:.2f}",
+            "v_max (V)": "{:.2f}",
+            "R^2": "{:.4f}",
+            "SS (V/dec)": "{:.3f}",
+            "I_on (A)": "{:.3e}",
+            "I_off (A)": "{:.3e}",
+            "I_on/I_off": "{:.1f}",
+            "gm_max (A/V)": "{:.3e}",
+            "V_GS_gm (V)": "{:.3f}",
+        },
+        label="Métricas por medición",
+    )
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
+def _(df_metrics, hdf5_path, mo, plt, plot_transfer_linearized):
+    _g = df_metrics.reset_index(drop=True)
+    _ncols = 3
+    _nrows = (len(_g) + _ncols - 1) // _ncols
+    _fig, _axes = plt.subplots(
+        _nrows, _ncols, figsize=(4.6 * _ncols, 3.6 * _nrows), squeeze=False
+    )
+    for _ax, (_, _row) in zip(_axes.ravel(), _g.iterrows()):
+        plot_transfer_linearized(
+            hdf5_path,
+            _row["measurement"],
+            _row["v_min (V)"],
+            _row["v_max (V)"],
+            ax=_ax,
+        )
+    for _ax in _axes.ravel()[len(_g):]:
+        _ax.set_visible(False)
+    _fig.suptitle("Ventanas elegidas por medición", fontsize=13, fontweight="bold")
+    _fig.tight_layout(rect=[0, 0, 1, 0.97])
+    _view = mo.as_html(_fig)
+    plt.close(_fig)
+    _view
+    return
+
+
+@app.cell
+def _(Path, df_metrics, file_widget, mo):
+    mo.download(
+        data=lambda: df_metrics.to_csv(index=False),
+        filename=f"transfer_metrics_{Path(file_widget.value).stem}.csv",
+        mimetype="text/csv",
+        label="Descargar métricas (CSV)",
+    )
+    return
+
+
+@app.cell
 def _(
     exclude_widget,
     file_widget,
     mo,
-    selected_measurements,
+    transfer_measurements,
     vmax_widget,
     vmin_widget,
 ):
-    excluded = exclude_widget.value
+    _excluded = ", ".join(exclude_widget.value) if exclude_widget.value else "ninguna"
     mo.md(f"""
     ---
 
-    **Configuración de esta corrida**
+    **Configuración de la corrida**
 
     | Parámetro | Valor |
     |---|---|
     | Archivo | `{file_widget.value}` |
-    | Mediciones incluidas | {len(selected_measurements)} |
-    | Mediciones excluidas | {", ".join(excluded) if excluded else "—"} |
-    | Ventana $V_{{min}}$ | {vmin_widget.value[0]:.2f} a {vmin_widget.value[1]:.2f} V |
-    | Ventana $V_{{max}}$ | {vmax_widget.value[0]:.2f} a {vmax_widget.value[1]:.2f} V |
+    | Mediciones de transfer | {len(transfer_measurements)} |
+    | Mediciones excluidas | {_excluded} |
+    | Rango $V_{{min}}$ | {vmin_widget.value[0]:.2f} a {vmin_widget.value[1]:.2f} V |
+    | Rango $V_{{max}}$ | {vmax_widget.value[0]:.2f} a {vmax_widget.value[1]:.2f} V |
     """)
     return
 

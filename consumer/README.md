@@ -24,10 +24,14 @@ once. See [For maintainers](#for-maintainers) below.
 ## Using a report
 
 1. Click **Open reports**.
-2. Choose a report card: *Transfer curves*, *Calibration curve*, or
-   *Data exploration*.
+2. Choose a report card: *Transfer curves*, *Output curves*,
+   *Calibration curve*, or *Data exploration*.
 3. Pick an HDF5 file from the dropdown and adjust the widgets on the page.
 4. The plots and tables update automatically.
+
+The gallery opens the report versions of each analysis: the code is hidden and
+the controls are limited to the options a consumer needs. The full analysis
+apps are only for maintainers and open with `marimo edit`.
 
 The report server runs only on your computer (`127.0.0.1`). Other people cannot
 access it from the network.
@@ -92,4 +96,6 @@ Validate without opening the GUI:
 .venv/bin/python consumer/launcher.py --export
 ```
 
-To change which reports consumers see, edit `consumer/reports.json`.
+To change which reports consumers see, edit `consumer/reports.json`. The
+manifest points to the `03_*_report.py` apps; the `02_*_marimo.py` analysis
+apps and the Jupyter notebooks are developer material and are not listed there.

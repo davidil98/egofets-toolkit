@@ -35,7 +35,8 @@ egofets-toolkit/
 │   └── _legacy/                # Superseded Jupyter reports (reference only)
 ├── src/
 │   ├── readers/                # HDF5 readers and inspection helpers
-│   ├── analysis.py             # Parameter extraction (V_th, fits)
+│   ├── analysis.py             # Transfer/output parameter extraction
+│   ├── calibration.py          # Calibration curve pipeline
 │   ├── plotting.py             # Matplotlib figures for transfers/outputs/stability
 │   └── io/                     # Figure, data, and script saving utilities
 ├── consumer/                   # Desktop launcher, report manifest, shortcut installer
@@ -98,14 +99,16 @@ consumer mode without opening the GUI:
 # Explore a raw measurement file (Jupyter)
 jupyter lab notebooks/01_exploration/01_exploration_analysis.ipynb
 
-# Develop a Marimo app (code visible, reactive)
+# Develop the Marimo analysis apps (code visible, reactive)
 marimo edit notebooks/02_transfer_curves/02_transfer_marimo.py
+marimo edit notebooks/03_output_curves/02_output_marimo.py
+marimo edit notebooks/04_calibration_curve/02_calibration_marimo.py
 
-# Present the app read-only (code hidden)
-marimo run notebooks/02_transfer_curves/02_transfer_marimo.py
+# Present a consumer report read-only (code hidden)
+marimo run notebooks/02_transfer_curves/03_transfer_report.py
 
-# Export a static HTML report
-marimo export html notebooks/02_transfer_curves/02_transfer_marimo.py -o report.html
+# Export the same report as static HTML
+marimo export html notebooks/02_transfer_curves/03_transfer_report.py --no-include-code -o report.html
 
 # Open the consumer launcher (desktop control panel)
 python consumer/launcher.py
@@ -151,8 +154,9 @@ project root to `sys.path`, so no package installation is needed.
 | Module | Purpose | Main API |
 |--------|---------|----------|
 | `src.readers` | Inspect and read HDF5 measurements | `list_measurements`, `read_curve`, `read_all_curves`, `print_structure`, `view_tree_content` |
-| `src.plotting` | Matplotlib figures | `plot_transfer`, `plot_output`, `plot_grid`, `plot_i_vs_time` |
-| `src.analysis` | Parameter extraction | `extract_vth_for_transfers` |
+| `src.plotting` | Matplotlib figures | `plot_transfer`, `plot_output`, `plot_transfer_linearized`, `plot_transfer_vread`, `plot_grid`, `plot_i_vs_time` |
+| `src.analysis` | Transfer/output parameter extraction | `extract_vth_for_transfers`, `extract_transfer_metrics`, `extract_output_metrics`, `clean_forward_branch`, `forward_gm`, `output_branch` |
+| `src.calibration` | Calibration curve pipeline | `calibration_measurements`, `gm_table`, `extract_reading`, `fit_calibration`, `batch_curve` |
 | `src.io` | Save figures, data, and code | `SaveConfig`, `save_figure`, `save_result`, `record_script` |
 
 Example:
@@ -171,17 +175,17 @@ Each analysis follows the same three-file convention:
 | File | Role | Audience |
 |------|------|----------|
 | `01_<analysis>_analysis.ipynb` | Full exploratory analysis: every step, check, and intermediate result. | Developers |
-| `02_<analysis>_marimo.py` | The same analysis as a reactive Marimo app with widgets. | Developers and consumers |
-| `03_<analysis>_report.py` | Condensed report app: runs with default parameters and exports HTML plus downloadable figures. | Consumers |
+| `02_<analysis>_marimo.py` | The same analysis as a reactive Marimo app with widgets, opened with `marimo edit` so the code stays visible. | Developers |
+| `03_<analysis>_report.py` | Condensed report app: default parameters, hidden code, HTML export, and downloadable tables. | Consumers |
 
 Current status:
 
 | Analysis | `01` analysis | `02` Marimo app | `03` report app |
 |----------|---------------|-----------------|-----------------|
 | Exploration | `01_exploration/01_exploration_analysis.ipynb` | `01_exploration/02_exploration_marimo.py` | — |
-| Transfer curves | `02_transfer_curves/01_transfer_analysis.ipynb` | `02_transfer_curves/02_transfer_marimo.py` | — |
-| Output curves | `03_output_curves/01_output_analysis.ipynb` | Pending | — |
-| Calibration | `04_calibration_curve/01_calibration_analysis.ipynb` | `04_calibration_curve/02_calibration_marimo.py` | — |
+| Transfer curves | `02_transfer_curves/01_transfer_analysis.ipynb` | `02_transfer_curves/02_transfer_marimo.py` | `02_transfer_curves/03_transfer_report.py` |
+| Output curves | `03_output_curves/01_output_analysis.ipynb` | `03_output_curves/02_output_marimo.py` | `03_output_curves/03_output_report.py` |
+| Calibration | `04_calibration_curve/01_calibration_analysis.ipynb` | `04_calibration_curve/02_calibration_marimo.py` | `04_calibration_curve/03_calibration_report.py` |
 | Presentation lab | `05_presentation/01_layout_lab.py` (internal) | — | — |
 
 Superseded Jupyter reports are kept in `notebooks/_legacy/` for reference.
@@ -207,9 +211,8 @@ Each curve stores `measured_V_GS`, `measured_V_DS`, `measured_I_DS`,
 
 - Portable distribution (`conda-pack`) for machines without a prepared
   environment.
-- `03_<analysis>_report.py` apps with HTML export and per-figure download
-  (Plotly, or a Matplotlib download button).
-- Marimo conversion of the output curve analysis.
+- Per-figure download in the HTML reports (Plotly, or a Matplotlib download
+  button).
 - Translation of notebooks and docstrings from Spanish to English.
 
 ## License and contact

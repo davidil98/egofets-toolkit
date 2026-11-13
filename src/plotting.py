@@ -2,6 +2,7 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.stats import linregress
 
 from .readers.keithley_dean import list_measurements, read_all_curves, _select_direction
 
@@ -77,15 +78,10 @@ def plot_transfer(hdf5_path, measurement_name, direction: str='both', ax=None):
 
     return fig, ax
 
-def plot_output(hdf5_path, measurement_name, ax=None):
+def plot_output(hdf5_path, measurement_name, ax=None, direction: str = 'both'):
     """Grafica todas las curvas de una medicion output desde un HDF5.
 
-    Cada V_DS se dibuja con un color distinto.
-    
-    Para añadir más curvas a la misma figura, se recomienda como ejemplo:
-        
-    >>> fig, ax = plot_transfer(hdf5_path, measurement_name, direction='fwd')
-    >>> ax.plot(v_gs, i_ds, 'o-', ms=3, color='red', label='otra curva')
+    Cada V_GS se dibuja con un color distinto.
 
     Parameters
     ----------
@@ -95,6 +91,9 @@ def plot_output(hdf5_path, measurement_name, ax=None):
         Nombre del grupo top-level dentro del HDF5.
     ax : matplotlib.axes.Axes, opcional
         Ejes donde graficar. Si es None, se crea una figura nueva.
+    direction : str, opcional
+        Aceptado por compatibilidad con ``plot_grid``. En una medicion output
+        V_GS es constante, asi que el barrido no se recorta.
 
     Returns
     -------
@@ -126,6 +125,98 @@ def plot_output(hdf5_path, measurement_name, ax=None):
     ax.grid(True, alpha=0.3)
 
     return fig, ax
+
+def plot_transfer_vread(
+    hdf5_path,
+    measurement_name,
+    v_read,
+    ax=None,
+    direction: str = 'fwd',
+    min_points: int = 5,
+):
+    """Curvas forward de una medicion transfer + punto interpolado en V_READ.
+
+    Ademas de dibujar la transfer con :func:`plot_transfer`, marca una estrella
+    por replica en ``V_READ`` y una linea vertical en ese ``V_GS``.
+
+    La firma es compatible con :func:`plot_grid`, que la llama como
+    ``plot_func(hdf5_path, m_name, ax=ax, direction='fwd')``; en un notebook se
+    puede pasar ``v_read`` con ``functools.partial`` o una lambda.
+    """
+    fig, ax = plot_transfer(
+        hdf5_path, measurement_name, direction=direction, ax=ax
+    )
+
+    for curve in read_all_curves(hdf5_path, measurement_name, direction=direction):
+        if len(curve['v_gs']) < min_points:
+            continue
+        v = np.asarray(curve['v_gs'], dtype=float)
+        i = np.asarray(curve['i_ds'], dtype=float)
+        order = np.argsort(v)
+        i_read = float(np.interp(v_read, v[order], i[order]))
+        ax.plot(v_read, i_read, 'r*', ms=9, zorder=5)
+
+    ax.axvline(v_read, color='gray', ls='--', lw=0.8)
+    return ax
+
+
+def plot_transfer_linearized(
+    hdf5_path,
+    measurement_name,
+    v_min=None,
+    v_max=None,
+    ax=None,
+    direction: str = 'fwd',
+):
+    """Linealizacion ``sqrt(|I_DS|)`` de una transfer con la recta de ajuste.
+
+    Usa la curva de mayor ``|V_DS|`` (la mas cercana a saturacion) y ajusta una
+    recta en ``[v_min, v_max]``. Si ``v_min`` o ``v_max`` son ``None`` se usa
+    todo el barrido. La firma es compatible con :func:`plot_grid`; para fijar la
+    ventana se puede envolver con ``functools.partial`` o una lambda.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Eje con la linealizacion, la recta y una etiqueta con ``V_th``/``R^2``.
+    """
+    if ax is None:
+        _, ax = plt.subplots(figsize=(5, 4))
+
+    curves = read_all_curves(hdf5_path, measurement_name, direction=direction)
+    if not curves:
+        ax.text(0.5, 0.5, 'Sin curvas', transform=ax.transAxes,
+                ha='center', va='center')
+        return ax
+
+    curve = max(curves, key=lambda c: abs(float(c['v_ds'][0])))
+    v_gs = np.asarray(curve['v_gs'], dtype=float)
+    i_ds = np.asarray(curve['i_ds'], dtype=float)
+    sqrt_ids = np.sqrt(np.abs(i_ds))
+
+    lo = float(np.min(v_gs)) if v_min is None else float(v_min)
+    hi = float(np.max(v_gs)) if v_max is None else float(v_max)
+    mask = (v_gs >= lo) & (v_gs <= hi)
+
+    ax.plot(v_gs, sqrt_ids, 'o-', ms=3, color='C3',
+            label=r'$\sqrt{|I_{DS}|}$')
+    if mask.sum() >= 2:
+        result = linregress(v_gs[mask], sqrt_ids[mask])
+        x_fit = np.array([lo, hi])
+        ax.plot(x_fit, result.intercept + result.slope * x_fit, '--',
+                color='C2', lw=2,
+                label=(f'$V_{{th}}$={-result.intercept / result.slope:.3f} V, '
+                       f'$R^2$={result.rvalue ** 2:.3f}'))
+        ax.axvline(lo, color='gray', ls=':', lw=0.8)
+        ax.axvline(hi, color='gray', ls=':', lw=0.8)
+
+    ax.set_xlabel(r"$V_{GS}$ (V)")
+    ax.set_ylabel(r"$\sqrt{|I_{DS}|}$ ($\sqrt{A}$)")
+    ax.set_title(f"Linealizacion — {measurement_name}", fontsize=9)
+    ax.legend(fontsize=7)
+    ax.grid(True, alpha=0.3)
+    return ax
+
 
 def plot_grid(hdf5_path, measurements: list, plot_func: callable, ncols: int = 3, figsize_per: tuple = (5, 4), title_suffix: str = None):
     """Crea una figura y grafica varias mediciones en una grilla de subplots usando la funcion plot_func a partir de un HDF5.

@@ -3,13 +3,18 @@
   "apps": [
     {
       "name": "Transfer curves",
-      "description": "Transfer measurements, V_th extraction, and CSV export.",
-      "path": "notebooks/02_transfer_curves/02_transfer_marimo.py"
+      "description": "Transfer measurements with V_th, SS, I_on/I_off, and CSV export.",
+      "path": "notebooks/02_transfer_curves/03_transfer_report.py"
+    },
+    {
+      "name": "Output curves",
+      "description": "Output measurements with on-resistance, linear transconductance, and saturation current.",
+      "path": "notebooks/03_output_curves/03_output_report.py"
     },
     {
       "name": "Calibration curve",
-      "description": "Calibration batches and response curves.",
-      "path": "notebooks/04_calibration_curve/02_calibration_marimo.py"
+      "description": "Calibration batches, normalized response, and linear-log fits.",
+      "path": "notebooks/04_calibration_curve/03_calibration_report.py"
     },
     {
       "name": "Data exploration",
