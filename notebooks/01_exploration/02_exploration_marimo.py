@@ -6,7 +6,7 @@
 
 import marimo
 
-__generated_with = "0.25.2"
+__generated_with = "0.23.5"
 app = marimo.App(width="full", app_title="EGOFET — Data exploration")
 
 
@@ -42,9 +42,10 @@ def _():
     return Path, h5py, mo, os, pd, sys
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(Path, mo, os, sys):
     def find_project_root(marker="src"):
+        "This resolve the project root directory by looking for a marker directory."
         cwd = Path(os.getcwd()).resolve()
         for parent in [cwd, *cwd.parents]:
             if (parent / marker).is_dir():
@@ -64,9 +65,25 @@ def _(Path, mo, os, sys):
     )
 
     data_folder = PROJECT_ROOT / "data" / "raw"
+
+    mo.md(f"""
+    Actual directory is ``{data_folder}``
+    """)
+    return (
+        data_folder,
+        get_dset_array,
+        get_dset_names,
+        list_measurements,
+        print_structure,
+        view_tree_content,
+    )
+
+
+@app.cell
+def _(data_folder, mo):
     hdf5_files = sorted(p.name for p in data_folder.glob("*.hdf5"))
 
-    default_file = "transf-outp_example.hdf5"
+    default_file = ""
     if default_file not in hdf5_files:
         default_file = hdf5_files[0] if hdf5_files else None
 
@@ -77,16 +94,7 @@ def _(Path, mo, os, sys):
         searchable=True,
     )
     file_widget
-    return (
-        data_folder,
-        file_widget,
-        get_dset_array,
-        get_dset_names,
-        hdf5_files,
-        list_measurements,
-        print_structure,
-        view_tree_content,
-    )
+    return file_widget, hdf5_files
 
 
 @app.cell(hide_code=True)
