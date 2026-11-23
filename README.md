@@ -18,6 +18,10 @@ readers, plotting helpers, analysis routines, and example data stay in.
 Reports are **reactive**: every parameter is exposed as a widget with a sensible
 default, so a consumer can change the analysis without touching the code.
 
+Essentially, you should load your data files and photos in `data/` directory. We 
+recommend sync (download) your files form cloud storage providers. For quick 
+star, you can found `data-example`.
+
 ## Repository layout
 
 ```

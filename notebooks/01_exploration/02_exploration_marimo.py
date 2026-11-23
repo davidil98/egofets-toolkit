@@ -11,6 +11,25 @@ app = marimo.App(width="full", app_title="EGOFET — Data exploration")
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # EXPLORATION FOR KEITHLEY .hdf5 FILES
+
+    This notebook describe the development of code for data read and extraction of `.hdf5` files obtained by the keithley 2600A equipment and the Dean controller. At the same time, here's shown the marimo widget potential as a reactive notebook for presenting data treatment.
+    There's two principal ways to use marimo via termina:
+
+    ```bash
+    marimo edit notebooks/01_exploration/02_exploration_marimo.py # for edit code
+
+    marimo run notebooks/01_exploration/02_exploration_marimo.py # for display markdown and output-cells.
+    ```
+
+    We'll start loading the file frome this directory
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def _():
     import os
     import sys
@@ -124,7 +143,7 @@ def _(hdf5_path, list_measurements, mo):
 
 
 @app.cell
-def _(hdf5_path, h5py, measurement_widget, mo):
+def _(h5py, hdf5_path, measurement_widget, mo):
     curve_names = []
     if measurement_widget.value is not None:
         with h5py.File(hdf5_path, "r") as f:
@@ -148,11 +167,19 @@ def _(hdf5_path, h5py, measurement_widget, mo):
         else mo.md("_This measurement stores its datasets directly in the group._")
     )
     _view
-    return curve_names, curve_widget
+    return (curve_widget,)
 
 
 @app.cell
-def _(curve_widget, get_dset_names, hdf5_path, measurement_widget, mo, measurements, pd):
+def _(
+    curve_widget,
+    get_dset_names,
+    hdf5_path,
+    measurement_widget,
+    measurements,
+    mo,
+    pd,
+):
     mode = next(
         (m["mode"] for m in measurements if m["name"] == measurement_widget.value),
         "unknown",
@@ -180,7 +207,7 @@ def _(curve_widget, get_dset_names, hdf5_path, measurement_widget, mo, measureme
             mo.ui.table(dataset_table, pagination=False, selection=None),
         ]
     )
-    return curve_name, datasets, mode
+    return curve_name, datasets
 
 
 @app.cell(hide_code=True)
