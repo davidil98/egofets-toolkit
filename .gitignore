@@ -13,10 +13,10 @@ __pycache__/
 .ruff_cache/
 __marimo__/
 
-# --- Generated data, reports and figures ---
+# --- Generated data, documents related, reports and figures ---
 output/
 data/
-
+docs/
 
 # Note: __init__.py is intentionally NOT ignored — it is the
 # Python package marker required for `from src...` imports.

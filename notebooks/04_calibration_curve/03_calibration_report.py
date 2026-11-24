@@ -231,7 +231,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 2. Transconductancia y $V_{READ}$
+    ## Transconductancia y $V_{READ}$
 
     La transconductancia es la derivada de la corriente respecto de la tensión
     de gate:
@@ -290,7 +290,7 @@ def _(
 @app.cell(hide_code=True)
 def _(V_READ, mo):
     mo.md(rf"""
-    ## 3.1 Lectura en un punto
+    ## A) Lectura en un punto
 
     La forma más directa de construir la respuesta es interpolar la corriente
     en un único $V_{{GS}}$:
@@ -343,7 +343,7 @@ def _(
 @app.cell(hide_code=True)
 def _(V_READ, mo):
     mo.md(rf"""
-    ## 3.2 Ventana de puntos
+    ## B) Ventana de puntos
 
     En lugar de un único valor, se promedian $N$ puntos de $I_{{DS}}$ en una
     ventana de ancho $w$ alrededor de $V_{{READ}}$:
