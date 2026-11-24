@@ -6,7 +6,7 @@
 
 import marimo
 
-__generated_with = "0.23.5"
+__generated_with = "0.25.2"
 app = marimo.App(width="full", app_title="EGOFET — Data exploration")
 
 
@@ -67,7 +67,9 @@ def _(Path, mo, os, sys):
     data_folder = PROJECT_ROOT / "data" / "raw"
 
     mo.md(f"""
-    Actual directory is ``{data_folder}``
+    Actual directory is ``{data_folder}``.
+
+    You can select a file from the dropdown below to view its structure and content.
     """)
     return (
         data_folder,
@@ -97,14 +99,13 @@ def _(data_folder, mo):
     return file_widget, hdf5_files
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(data_folder, file_widget, hdf5_files, mo):
     mo.stop(
         not hdf5_files,
         mo.md(f"**No `.hdf5` files found in** `{data_folder}`"),
     )
     hdf5_path = data_folder / file_widget.value
-    mo.md(f"`{hdf5_path}`")
     return (hdf5_path,)
 
 
@@ -113,15 +114,22 @@ def _(mo):
     mo.md("""
     ## 1. File tree
 
-    Groups, datasets, and attributes in the selected file.
+    Now, we're going to deploy Groups, datasets, and attributes in the selected file with the functions created in `src/` directory of the project. The function `print_structure()` will show you more info about the attributes and data specifications of the `.hdf5` content.
     """)
     return
 
 
 @app.cell
-def _(hdf5_path, print_structure, view_tree_content):
-    print_structure(hdf5_path)
-    view_tree_content(hdf5_path, attribute_name="measurement_mode")
+def _(hdf5_path, mo, print_structure):
+    with mo.redirect_stderr(): # This function is for redirect print() function to a marimo output
+        print_structure(hdf5_path, max_depth=3)
+    return
+
+
+@app.cell
+def _(hdf5_path, mo, view_tree_content):
+    with mo.redirect_stderr():
+        view_tree_content(hdf5_path, attribute_name="measurement_mode")
     return
 
 
@@ -143,7 +151,7 @@ def _(hdf5_path, list_measurements, mo):
     measurement_widget = mo.ui.dropdown(
         options=measurement_names,
         value=measurement_names[0] if measurement_names else None,
-        label="Measurement",
+        label="Select Measurement",
         searchable=True,
     )
     measurement_widget
@@ -164,7 +172,7 @@ def _(h5py, hdf5_path, measurement_widget, mo):
         curve_widget = mo.ui.dropdown(
             options=curve_names,
             value=curve_names[0],
-            label="Curve",
+            label="Select Curve",
         )
     else:
         curve_widget = None

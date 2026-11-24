@@ -1,7 +1,11 @@
 import marimo
 
-__generated_with = "0.25.2"
-app = marimo.App(width="full", app_title="EGOFET — Transfer analysis")
+__generated_with = "0.23.5"
+app = marimo.App(
+    width="full",
+    app_title="EGOFET — Transfer analysis",
+    layout_file="layouts/02_transfer_marimo.slides.json",
+)
 
 
 @app.cell
@@ -62,8 +66,6 @@ def _(Path, os, sys):
         plot_transfer,
         plot_transfer_linearized,
         read_all_curves,
-        read_curve,
-        view_measurements,
     )
 
 
@@ -141,7 +143,7 @@ def _(data_folder, file_widget, list_measurements, mo, pd):
         ],
         gap=1,
     )
-    return hdf5_path, measurements, transfer_measurements
+    return hdf5_path, transfer_measurements
 
 
 @app.cell
@@ -203,11 +205,11 @@ def _(hdf5_path, measurement_widget, mo, pd, read_all_curves):
         },
         label="Curvas de la medición seleccionada",
     )
-    return (df_curves,)
+    return
 
 
 @app.cell
-def _(hdf5_path, measurement_widget, mo, plt, plot_transfer):
+def _(hdf5_path, measurement_widget, mo, plot_transfer, plt):
     _fig, _ax = plot_transfer(
         hdf5_path, measurement_widget.value, direction="both"
     )
@@ -286,7 +288,7 @@ def _(
     _view = mo.as_html(_fig)
     plt.close(_fig)
     _view
-    return i_ds_fit, sqrt_ids, v_gs_fit
+    return sqrt_ids, v_gs_fit
 
 
 @app.cell
@@ -318,15 +320,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    linregress,
-    mo,
-    np,
-    plt,
-    sqrt_ids,
-    v_gs_fit,
-    window_widget,
-):
+def _(linregress, mo, np, plt, sqrt_ids, v_gs_fit, window_widget):
     _v_min, _v_max = window_widget.value
     _mask = (v_gs_fit >= _v_min) & (v_gs_fit <= _v_max)
     if _v_min >= _v_max or _mask.sum() < 3:
@@ -417,7 +411,7 @@ def _(mo):
 
 
 @app.cell
-def _(forward_gm, hdf5_path, measurement_widget, mo, np, plt, read_all_curves):
+def _(forward_gm, hdf5_path, measurement_widget, mo, plt, read_all_curves):
     _curves = read_all_curves(
         hdf5_path, measurement_widget.value, direction="fwd"
     )
@@ -576,7 +570,7 @@ def _(df_metrics, mo):
 
 
 @app.cell
-def _(df_metrics, hdf5_path, mo, plt, plot_transfer_linearized):
+def _(df_metrics, hdf5_path, mo, plot_transfer_linearized, plt):
     _g = df_metrics.reset_index(drop=True)
     _ncols = 3
     _nrows = (len(_g) + _ncols - 1) // _ncols
