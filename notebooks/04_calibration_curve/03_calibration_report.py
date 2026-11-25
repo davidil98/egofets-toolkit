@@ -158,7 +158,25 @@ def _(
     mo.stop(bool(_issues), mo.callout(mo.md("  \n".join(_issues)), kind="warn"))
 
     BATCH = batches[0]
-    return BATCH, baseline, calibration, devices, hdf5_path
+
+    # Estado de los controles. Se declara acá para que persista cuando la
+    # celda que dibuja los widgets se vuelva a ejecutar (allow_self_loops).
+    get_exclude, set_exclude = mo.state([], allow_self_loops=True)
+    get_ncols, set_ncols = mo.state(4, allow_self_loops=True)
+    get_window, set_window = mo.state(0.05, allow_self_loops=True)
+    return (
+        BATCH,
+        baseline,
+        calibration,
+        devices,
+        get_exclude,
+        get_ncols,
+        get_window,
+        hdf5_path,
+        set_exclude,
+        set_ncols,
+        set_window,
+    )
 
 
 @app.cell(hide_code=True)
@@ -167,15 +185,21 @@ def _(
     calibration,
     devices,
     file_widget,
+    get_exclude,
+    get_ncols,
     hdf5_path,
     mo,
+    parse_measurement_name,
     plot_grid,
     plot_transfer,
     plt,
+    set_exclude,
+    set_ncols,
 ):
     exclude_widget = mo.ui.multiselect(
         options=devices,
-        value=[],
+        value=get_exclude(),
+        on_change=set_exclude,
         label="Dispositivos excluidos",
         full_width=True,
     )
@@ -183,37 +207,46 @@ def _(
         start=1,
         stop=4,
         step=1,
-        value=4,
+        value=get_ncols(),
+        on_change=set_ncols,
         label="Columnas de la grilla",
         show_value=True,
     )
-    window_widget = mo.ui.slider(
-        start=0.01,
-        stop=0.20,
-        step=0.01,
-        value=0.05,
-        label="Ancho de ventana (V)",
-        show_value=True,
+
+    _excluded_values = get_exclude()
+    _ncols = get_ncols()
+
+    def _is_excluded(measurement):
+        device = parse_measurement_name(measurement)[0]
+        return device in _excluded_values or device.split("B")[0] in _excluded_values
+
+    selected_measurements = [
+        m for m in calibration if not _is_excluded(m)
+    ]
+    included_devices = sorted(
+        {parse_measurement_name(m)[0] for m in selected_measurements}
     )
 
-    _fig = plot_grid(
-        hdf5_path,
-        calibration,
-        plot_transfer,
-        ncols=4,
-        figsize_per=(4.0, 3.2),
-        title_suffix="Transfers de calibración (forward)",
-    )
-    _view_fig = mo.as_html(_fig)
-    plt.close(_fig)
+    if not selected_measurements:
+        _view_fig = mo.callout(
+            mo.md("No hay dispositivos seleccionados para graficar."),
+            kind="warn",
+        )
+    else:
+        _fig = plot_grid(
+            hdf5_path,
+            selected_measurements,
+            plot_transfer,
+            ncols=_ncols,
+            figsize_per=(4.0, 3.2),
+            title_suffix="Transfers de calibración (forward)",
+        )
+        _view_fig = mo.as_html(_fig)
+        plt.close(_fig)
 
+    _excluded = ", ".join(_excluded_values) if _excluded_values else "ninguno"
     mo.vstack(
         [
-            mo.md(
-                f"**Archivo:** `{file_widget.value}` · "
-                f"**Batch:** {BATCH} · **Mediciones:** {len(calibration)}"
-                f" · **Dispositivos:** {len(devices)}"
-            ),
             mo.hstack(
                 [exclude_widget, ncols_widget],
                 justify="start",
@@ -221,11 +254,17 @@ def _(
                 gap=1,
                 wrap=True,
             ),
+            mo.md(
+                f"**Archivo:** `{file_widget.value}` · "
+                f"**Batch:** {BATCH} · **Mediciones:** {len(selected_measurements)}"
+                f" / {len(calibration)} · **Dispositivos:** {len(included_devices)}"
+                f" / {len(devices)} · **Excluidos:** {_excluded}"
+            ),
             _view_fig,
         ],
         gap=1,
     )
-    return exclude_widget, window_widget
+    return included_devices, selected_measurements
 
 
 @app.cell(hide_code=True)
@@ -248,15 +287,15 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    calibration,
     extract_reading,
     gm_summary,
     gm_table,
     hdf5_path,
     mo,
     pick_v_read,
+    selected_measurements,
 ):
-    df_gm = gm_table(hdf5_path, calibration)
+    df_gm = gm_table(hdf5_path, selected_measurements)
     df_gm_summary = gm_summary(df_gm)
     V_READ = pick_v_read(df_gm)
 
@@ -270,7 +309,7 @@ def _(
 
     # Lectura en un punto: un I_DS interpolado por réplica y normalizado
     # contra la Ref del mismo dispositivo.
-    df_pts = extract_reading(hdf5_path, calibration, V_READ, method="point")
+    df_pts = extract_reading(hdf5_path, selected_measurements, V_READ, method="point")
     missing_ref = sorted(
         set(df_pts["device"])
         - set(df_pts.loc[df_pts["condition"] == "Ref", "device"])
@@ -314,20 +353,21 @@ def _(V_READ, mo):
 def _(
     BATCH,
     V_READ,
-    calibration,
+    get_ncols,
     hdf5_path,
     mo,
     plot_grid,
     plot_transfer_vread,
     plt,
+    selected_measurements,
 ):
     _fig = plot_grid(
         hdf5_path,
-        calibration,
+        selected_measurements,
         lambda path, name, ax, direction="fwd": plot_transfer_vread(
             path, name, V_READ, ax=ax, direction=direction
         ),
-        ncols=4,
+        ncols=get_ncols(),
         figsize_per=(4.0, 3.2),
         title_suffix=(
             f"{BATCH} — transfers con lectura en "
@@ -366,9 +406,8 @@ def _(V_READ, mo):
 
     Promediar varios puntos reduce la sensibilidad al ruido de una sola
     lectura. El ancho $w$ es un compromiso: una ventana grande promedia más,
-    pero puede mezclar puntos fuera de la zona de interés. El slider controla
-    $w$; las líneas punteadas de la figura marcan $V_{{READ}}$ y los bordes de
-    la ventana.
+    pero puede mezclar puntos fuera de la zona de interés. El slider de la
+    slide siguiente controla $w$.
     """)
     return
 
@@ -379,19 +418,41 @@ def _(
     MIN_POINTS,
     V_READ,
     V_WINDOW_SIDE,
-    calibration,
+    get_ncols,
+    get_window,
     hdf5_path,
     mo,
     plot_grid,
     plot_transfer_vread,
     plt,
     read_all_curves,
+    selected_measurements,
+    set_window,
     window_bounds,
-    window_widget,
 ):
+    window_widget = mo.ui.slider(
+        start=0.01,
+        stop=0.20,
+        step=0.01,
+        value=get_window(),
+        on_change=set_window,
+        label="Ancho de ventana (V)",
+        show_value=True,
+        debounce=True,
+    )
+    _window = get_window()
+    _ncols = get_ncols()
+
+    mo.stop(
+        not selected_measurements,
+        mo.callout(
+            mo.md("No hay dispositivos seleccionados para mostrar la ventana."),
+            kind="warn",
+        ),
+    )
     _curves = [
         c
-        for c in read_all_curves(hdf5_path, calibration[0], direction="fwd")
+        for c in read_all_curves(hdf5_path, selected_measurements[0], direction="fwd")
         if len(c["v_gs"]) >= MIN_POINTS
     ]
     mo.stop(
@@ -403,7 +464,7 @@ def _(
     )
     _curve = max(_curves, key=lambda c: abs(float(c["v_ds"][0])))
     _lo, _hi = window_bounds(
-        _curve["v_gs"], V_READ, window_widget.value, V_WINDOW_SIDE
+        _curve["v_gs"], V_READ, _window, V_WINDOW_SIDE
     )
 
     def _plot_window(path, name, ax, direction="fwd"):
@@ -414,18 +475,19 @@ def _(
 
     _fig = plot_grid(
         hdf5_path,
-        calibration,
+        selected_measurements,
         _plot_window,
-        ncols=4,
+        ncols=_ncols,
         figsize_per=(4.0, 3.2),
         title_suffix=(
             f"{BATCH} — transfers con ventana de lectura "
-            f"$w={window_widget.value:.2f}$ V"
+            f"$w={_window:.2f}$ V"
         ),
     )
     _view = mo.as_html(_fig)
     plt.close(_fig)
-    _view
+
+    mo.vstack([window_widget, _view], gap=1)
     return
 
 
@@ -434,18 +496,26 @@ def _(
     MIN_POINTS,
     V_READ,
     V_WINDOW_SIDE,
-    calibration,
     extract_reading,
+    get_window,
     hdf5_path,
     i_ds_window_mean,
     mo,
     np,
     plt,
     read_all_curves,
+    selected_measurements,
     window_bounds,
-    window_widget,
 ):
-    _measurement = calibration[0]
+    _window = get_window()
+    mo.stop(
+        not selected_measurements,
+        mo.callout(
+            mo.md("No hay dispositivos seleccionados para mostrar la ventana."),
+            kind="warn",
+        ),
+    )
+    _measurement = selected_measurements[0]
     _curves = [
         c
         for c in read_all_curves(hdf5_path, _measurement, direction="fwd")
@@ -460,7 +530,7 @@ def _(
     )
     _curve = max(_curves, key=lambda c: abs(float(c["v_ds"][0])))
     _lo, _hi = window_bounds(
-        _curve["v_gs"], V_READ, window_widget.value, V_WINDOW_SIDE
+        _curve["v_gs"], V_READ, _window, V_WINDOW_SIDE
     )
 
     _fig, _ax = plt.subplots(figsize=(8.8, 4.3))
@@ -481,7 +551,7 @@ def _(
             _c["v_gs"],
             _c["i_ds"],
             V_READ,
-            window_widget.value,
+            _window,
             V_WINDOW_SIDE,
         )
         for _c in _curves
@@ -497,7 +567,7 @@ def _(
         color="0.35",
         ls="--",
         lw=1.0,
-        label=f"ventana $w={window_widget.value:.2f}$ V",
+        label=f"ventana $w={_window:.2f}$ V",
     )
     _ax.axvline(
         V_READ,
@@ -528,16 +598,15 @@ def _(
 
     df_win = extract_reading(
         hdf5_path,
-        calibration,
+        selected_measurements,
         V_READ,
         method="window",
-        window=window_widget.value,
+        window=_window,
         side=V_WINDOW_SIDE,
     )
 
     mo.vstack(
         [
-            window_widget,
             mo.as_html(_fig),
             mo.md(f"$N = {_n_window}$ puntos por réplica dentro de la ventana."),
         ],
@@ -548,10 +617,8 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(df_pts, df_win, exclude_widget, fit_calibration, mo, pd):
-    df_fits, df_batch = fit_calibration(
-        df_pts, df_win, exclude=exclude_widget.value
-    )
+def _(df_pts, df_win, fit_calibration, mo, pd):
+    df_fits, df_batch = fit_calibration(df_pts, df_win)
 
     if df_batch.empty:
         _view = mo.callout(
@@ -613,12 +680,11 @@ def _(
     BATCH,
     V_READ,
     calibration_frame,
-    devices,
     df_batch,
     df_fits,
     df_pts,
     df_win,
-    exclude_widget,
+    included_devices,
     missing_ref,
     mo,
     np,
@@ -640,7 +706,7 @@ def _(
     _stats = mo.hstack(
         [
             mo.stat(BATCH, label="Batch", bordered=True),
-            mo.stat(str(len(devices)), label="Dispositivos", bordered=True),
+            mo.stat(str(len(included_devices)), label="Dispositivos", bordered=True),
             mo.stat(f"{V_READ:.2f} V", label="V_READ", bordered=True),
             mo.stat(_b_pt, label="b punto único", bordered=True),
             mo.stat(_r2_pt, label="R² punto único", bordered=True),
@@ -652,8 +718,8 @@ def _(
         gap=1,
     )
 
-    _cal_pt = calibration_frame(df_pts, exclude_widget.value)
-    _cal_win = calibration_frame(df_win, exclude_widget.value)
+    _cal_pt = calibration_frame(df_pts)
+    _cal_win = calibration_frame(df_win)
 
     if _cal_pt.empty and _cal_win.empty:
         _curves_view = mo.callout(
@@ -737,7 +803,7 @@ def _(
 
     mo.vstack(
         [
-            mo.md("## 4. Resultados finales"),
+            mo.md("## Resultados finales"),
             _stats,
             _curves_view,
             _warning,
@@ -758,10 +824,12 @@ def _(
     calibration,
     df_batch,
     df_fits,
-    exclude_widget,
     file_widget,
+    get_exclude,
+    get_window,
+    included_devices,
     mo,
-    window_widget,
+    selected_measurements,
 ):
     _parts = []
     _stem = Path(file_widget.value).stem
@@ -784,7 +852,9 @@ def _(
             )
         )
 
-    _excluded = ", ".join(exclude_widget.value) if exclude_widget.value else "ninguno"
+    _excluded_values = get_exclude()
+    _window = get_window()
+    _excluded = ", ".join(_excluded_values) if _excluded_values else "ninguno"
     _config = mo.md(f"""
     ### Configuración de la corrida
 
@@ -793,10 +863,12 @@ def _(
     | Archivo | `{file_widget.value}` |
     | Batch | {BATCH} |
     | Mediciones de calibración | {len(calibration)} |
+    | Mediciones incluidas | {len(selected_measurements)} |
+    | Dispositivos incluidos | {len(included_devices)} |
     | Mediciones fuera del patrón | {len(baseline)} |
     | Dispositivos excluidos | {_excluded} |
     | $V_{{READ}}$ | {V_READ:.2f} V |
-    | Ventana | {window_widget.value:.2f} V ({V_WINDOW_SIDE}) |
+    | Ventana | {_window:.2f} V ({V_WINDOW_SIDE}) |
     | Mínimo de puntos por curva | {MIN_POINTS} |
     """)
 
